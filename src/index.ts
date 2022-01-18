@@ -112,7 +112,7 @@ export interface CryptoFileDef {
    * Default `this.filePath`
    * @returns {Promise<string>}
    */
-  decryptFile(options: DecryptFileOptions): Promise<string>;
+  decryptFile(options?: DecryptFileOptions): Promise<string>;
   /**
    * Handles encrypting a provided password or a dynamically generated one
    *
@@ -144,7 +144,10 @@ class CryptoFile implements CryptoFileDef {
   encryptedFileExt: string;
 
   constructor({
-    filePath, secretKey, password, encryptedFileExt,
+    filePath,
+    secretKey,
+    password,
+    encryptedFileExt,
   }: CryptoFileConstrucProps) {
     this.password = password ?? '';
     this.secretKey = secretKey;
@@ -152,8 +155,8 @@ class CryptoFile implements CryptoFileDef {
     this.encryptedFileExt = encryptedFileExt ?? 'enc';
   }
 
-  private createCipher(): CipherGCM {
-    const SECRETKEY = this.secretKey;
+  private createCipher(usePassword: boolean): CipherGCM {
+    const SECRETKEY = usePassword ? this.password : this.secretKey;
     const IV = this.iv;
 
     if (SECRETKEY.length !== 32) {
@@ -186,7 +189,7 @@ class CryptoFile implements CryptoFileDef {
   }
 
   encryptPassword(password?: string): EncryptedResult {
-    const cipher = this.createCipher();
+    const cipher = this.createCipher(false);
     if (password) {
       if (password.length !== 32) {
         throw new Error('Password length must be 32 characters');
@@ -209,7 +212,7 @@ class CryptoFile implements CryptoFileDef {
     return result;
   }
 
-  decryptPassword(options: string | EncryptedResult) : string {
+  decryptPassword(options: string | EncryptedResult): string {
     const { iv, password, authTag } = typeof options === 'string' ? JSON.parse(options) : options;
     if (!iv) {
       throw new Error('Decrypt Password Failed: Missing IV value');
@@ -236,15 +239,15 @@ class CryptoFile implements CryptoFileDef {
   }
 
   async encryptFile(filePath?: string): Promise<string> {
-    if (filePath) {
-      this.filePath = filePath;
-    }
     if (!this.filePath) {
       throw new Error('Encrypt File Failed: Missing filepath value');
     }
+    if (filePath) {
+      this.filePath = filePath;
+    }
     const fileToEncrypt = await fs.readFile(this.filePath);
     const IV = this.iv;
-    const cipher = this.createCipher();
+    const cipher = this.createCipher(true);
     const encryptedFile = Buffer.concat([
       cipher.update(fileToEncrypt),
       cipher.final(),
@@ -257,15 +260,23 @@ class CryptoFile implements CryptoFileDef {
     return newFilePath;
   }
 
-  async decryptFile({ filePath, newFilePath }: DecryptFileOptions): Promise<string> {
-    if (filePath) {
-      this.filePath = filePath;
-    }
-    if (!this.filePath) {
+  async decryptFile(options?: DecryptFileOptions): Promise<string> {
+    if (!this.filePath && !options?.filePath) {
       throw new Error('Decrypt File Failed: Missing filepath value');
     }
+    if (options?.filePath) {
+      this.filePath = options.filePath;
+    } else {
+      this.filePath = `${this.filePath}${
+        this.filePath.includes(this.encryptedFileExt)
+          ? ''
+          : `.${this.encryptedFileExt}`
+      }`;
+    }
+
     const encryptedFile = await fs.readFile(this.filePath);
-    const newFilePathLocation = newFilePath || this.filePath.replace(`.${this.encryptedFileExt}`, '');
+    const newFilePathLocation = options?.newFilePath
+      || this.filePath.replace(`.${this.encryptedFileExt}`, '');
     const IV = encryptedFile.slice(0, 16);
     const authTag = encryptedFile.slice(16, 32);
     const encryptedWithoutIV = encryptedFile.slice(32);
@@ -275,10 +286,7 @@ class CryptoFile implements CryptoFileDef {
       decipher.update(encryptedWithoutIV),
       decipher.final(),
     ]);
-    await fs.writeFile(
-      newFilePathLocation,
-      decryptedFile,
-    );
+    await fs.writeFile(newFilePathLocation, decryptedFile);
 
     return newFilePathLocation;
   }
