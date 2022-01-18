@@ -1,5 +1,5 @@
 {
-  "name": "cryptofile",
+  "name": "@jluboff/cryptofile",
   "version": "1.0.0",
   "description": "A file/password encryptor/decryptor module written with native NodeJS modules",
   "main": "dist/src/index.js",
